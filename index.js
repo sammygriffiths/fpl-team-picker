@@ -1,29 +1,19 @@
 const axios           = require('axios');
 const randomUseragent = require('random-useragent');
 const cache           = require('./cache');
+const dataHelper      = require('./data')(axios, randomUseragent, cache);
 
-const run = async (axios, randomUseragent, cache) => {
-    console.debug('Getting data from cache');
-    let data = cache.get();
-    
-    if (data === null) {
-        console.debug('Cache expired, fetching data from FPL API');
+const gameWeek = 4;
 
-        let requestConfig = {
-            headers: {
-                'User-Agent': randomUseragent.getRandom()
-            }
-        };
+console.debug = () => {};
 
-        data = await axios.get('https://fantasy.premierleague.com/api/bootstrap-static/', requestConfig)
-            .then(response => response.data);
+const run = async () => {
+    const bootstrapData = await dataHelper.getBootstrapData();
+    const topTeamPicks  = await dataHelper.getTopTeamPicks(gameWeek, 10);
+    const players       = dataHelper.getPlayerData(bootstrapData, topTeamPicks);
+    const team          = dataHelper.getTopPickedTeam(players);
 
-        console.debug('Saving data to cache');
-        cache.set(data);
-        cache.save();
-    }
-    
-    console.log(data);
+    console.log(team);
 };
 
-run(axios, randomUseragent, cache);
+run();
