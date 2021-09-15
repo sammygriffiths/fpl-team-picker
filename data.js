@@ -2,6 +2,7 @@ const apiBase           = 'https://fantasy.premierleague.com/api/';
 const bootstrapEndpoint = 'bootstrap-static/';
 const topTeamsEndpoint  = 'leagues-classic/314/standings/?page_standings=';
 const teamPicksEndpoint = (entry, gameWeek) => `/entry/${entry}/event/${gameWeek}/picks/`;
+const fixturesEndpoint  = 'fixtures/?event=';
 
 module.exports = (axios, randomUseragent, cache) => {
     let axiosInstance = axios.create({
@@ -69,7 +70,6 @@ module.exports = (axios, randomUseragent, cache) => {
             }
             
             return teamData;
-
         },
 
         getTopTeamPicks: async (gameWeek, pageLimit = 3) => {
@@ -85,10 +85,48 @@ module.exports = (axios, randomUseragent, cache) => {
             return Promise.all(promises);
         },
 
-        getPlayerData: (bootstrapData, teamPicks) => {
+        getFixtures: async gameWeek => {
+            console.debug(`Getting fixture data from cache for gameweek ${gameWeek}`);
+            let fixtureCache = cache('fixtures');
+            let fixtureData  = fixtureCache.get();
+            
+            if (fixtureData === null) {
+                console.debug(`Cache expired, fetching fixture data for gameweek ${gameWeek} from FPL API`);
+
+                fixtureData = await axiosInstance.get(fixturesEndpoint + gameWeek).then(response => response.data);
+
+                console.debug(`Saving fixture data for gameweek ${gameWeek} to cache`);
+                fixtureCache.set(fixtureData, 86400000);
+                fixtureCache.save();
+            }
+            
+            return fixtureData;
+        },
+
+        getPlayerData: (bootstrapData, teamPicks, fixtures) => {
             let players = bootstrapData.elements;
 
             return players.map(player => {
+                let enrichedPlayer = {
+                    'id': player.id,
+                    'first_name': player.first_name,
+                    'second_name': player.second_name,
+                    'web_name': player.web_name,
+                    'now_cost': player.now_cost,
+                    'points_per_game': player.points_per_game,
+                    'team_code': player.team_code,
+                    'total_points': player.total_points,
+                    'transfers_in_event': player.transfers_in_event,
+                    'transfers_out_event': player.transfers_out_event,
+                    'value_season': player.value_season,
+                    'minutes': player.minutes,
+                    'goals_scored': player.goals_scored,
+                    'assists': player.assists,
+                    'clean_sheets': player.clean_sheets,
+                    'news': player.news,
+                };
+
+
                 let teamsPickedBy = teamPicks.filter(team => {
                     return !!team.find(pickedPlayer => pickedPlayer.element === player.id);
                 }).length;
@@ -99,11 +137,24 @@ module.exports = (axios, randomUseragent, cache) => {
                 }).length;
                 let teamsCaptainedByPercent = (teamsCaptainedBy / teamPicks.length) * 100;
 
-                player['top_teams_selected_by_percent']  = Math.round(teamsPickedByPercent * 100) / 100;
-                player['top_teams_captained_by_percent'] = Math.round(teamsCaptainedByPercent * 100) / 100;
-                player['position'] = bootstrapData.element_types.find(type => type.id === player.element_type).singular_name_short;
+                enrichedPlayer['top_teams_selected_by_percent']  = Math.round(teamsPickedByPercent * 100) / 100;
+                enrichedPlayer['top_teams_captained_by_percent'] = Math.round(teamsCaptainedByPercent * 100) / 100;
+                enrichedPlayer['position']                       = bootstrapData.element_types.find(type => type.id === player.element_type).singular_name_short;
+                
+                let fixture = fixtures.find(fixture => fixture.team_h === player.team);
+                
+                if (typeof fixture !== 'undefined') {
+                    enrichedPlayer['fixture_difficulty'] = fixture.team_h_difficulty
+                    enrichedPlayer['opposing_team_fixture_difficulty'] = fixture.team_a_difficulty
+                } else {
+                    fixture = fixtures.find(fixture => fixture.team_a === player.team);
+                    enrichedPlayer['fixture_difficulty'] = fixture.team_a_difficulty;
+                    enrichedPlayer['opposing_team_fixture_difficulty'] = fixture.team_h_difficulty;
+                }
 
-                return player;
+                enrichedPlayer['team'] = bootstrapData.teams.find(team => player.team === team.id).name;
+
+                return enrichedPlayer;
             });
         },
 
@@ -130,22 +181,22 @@ module.exports = (axios, randomUseragent, cache) => {
 
             for (let i = 0; i < gkpNum; i++) {
                 let player = allGkpPlayers[i];
-                pickedGkpPlayers.push(`${player.web_name}${mostCaptained === player ? ' - captain': ''}`);
+                pickedGkpPlayers.push(`${player.web_name}${mostCaptained === player ? ' (C)': ''}`);
             }
 
             for (let i = 0; i < defNum; i++) {
                 let player = allDefPlayers[i];
-                pickedDefPlayers.push(`${player.web_name}${mostCaptained === player ? ' - captain': ''}`);
+                pickedDefPlayers.push(`${player.web_name}${mostCaptained === player ? ' (C)': ''}`);
             }
 
             for (let i = 0; i < midNum; i++) {
                 let player = allMidPlayers[i];
-                pickedMidPlayers.push(`${player.web_name}${mostCaptained === player ? ' - captain': ''}`);
+                pickedMidPlayers.push(`${player.web_name}${mostCaptained === player ? ' (C)': ''}`);
             }
 
             for (let i = 0; i < fwdNum; i++) {
                 let player = allFwdPlayers[i];
-                pickedFwdPlayers.push(`${player.web_name}${mostCaptained === player ? ' - captain': ''}`);
+                pickedFwdPlayers.push(`${player.web_name}${mostCaptained === player ? ' (C)': ''}`);
             }
 
             return {
