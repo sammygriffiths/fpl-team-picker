@@ -12,7 +12,7 @@ const run = async () => {
     const topTeamPicks  = await dataHelper.getTopTeamPicks(gameWeek - 1, 10);
     const fixtures      = await dataHelper.getFixtures(gameWeek);
     const players       = dataHelper.getPlayerData(bootstrapData, topTeamPicks, fixtures);
-    const team          = dataHelper.getTopPickedTeam(players);
+    const team          = dataHelper.pickTeam(players);
 
     console.log(team);
 };

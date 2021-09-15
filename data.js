@@ -65,7 +65,7 @@ module.exports = (axios, randomUseragent, cache) => {
                 teamData = await axiosInstance.get(teamPicksEndpoint(entry, gameWeek)).then(response => response.data.picks);
 
                 console.debug(`Saving team pick data for entry ${entry} on gameweek ${gameWeek} to cache`);
-                teamCache.set(teamData);
+                teamCache.set(teamData, 86400000);
                 teamCache.save();
             }
             
@@ -205,6 +205,82 @@ module.exports = (axios, randomUseragent, cache) => {
                 mid: pickedMidPlayers,
                 fwd: pickedFwdPlayers,
             }
+        },
+
+        pickTeam: (players) => {
+            const oneTeamMax = 3;
+            let teamPicks    = {};
+
+            const positionMax = {
+                GKP: 2,
+                DEF: 5,
+                MID: 5,
+                FWD: 3,
+            };
+            const totalAvailablePicks = Object.values(positionMax).reduce((a, b) => a + b);
+
+            let budget = 1000;
+
+            const allPlayers = {
+                GKP: players.filter(player => player.position === 'GKP'),
+                DEF: players.filter(player => player.position === 'DEF'),
+                MID: players.filter(player => player.position === 'MID'),
+                FWD: players.filter(player => player.position === 'FWD'),
+            }
+
+            let pickedPlayers = {
+                GKP: [],
+                DEF: [],
+                MID: [],
+                FWD: [],
+            };
+
+            let totalMadePicks = 0;
+
+            const pick = (position) => {
+                if (pickedPlayers[position].length === positionMax[position]) {
+                    return false;
+                }
+
+                let playerBudget = totalMadePicks < 8 ? budget : budget / (totalAvailablePicks - totalMadePicks);
+
+                let player = allPlayers[position]
+                    .filter(player => player.now_cost <= playerBudget
+                        && player.total_points > 0
+                        && player.top_teams_selected_by_percent > 0
+                    ).sort((playerA, playerB) => {
+                        return (playerA.fixture_difficulty - playerB.fixture_difficulty) + (playerB.top_teams_selected_by_percent - playerA.top_teams_selected_by_percent);
+                    })[0] || {};
+
+                if (pickedPlayers[position].includes(player) || teamPicks[player.team_code] == oneTeamMax) {
+                    let playerIndex = allPlayers[position].indexOf(player);
+                    allPlayers[position].splice(playerIndex, 1);
+                    return pick(position);
+                }
+
+                pickedPlayers[position].push(player);
+                teamPicks[player.team_code] = (teamPicks[player.team_code] || 0) + 1;
+                budget -= player.now_cost;
+
+                totalMadePicks++;
+            }
+
+            while (totalMadePicks < totalAvailablePicks) {
+                pick('FWD');
+                pick('MID');
+                pick('DEF');
+                pick('GKP');
+            }
+
+            return {
+                team: {
+                    GKP: pickedPlayers.GKP.map(player => player.web_name),
+                    DEF: pickedPlayers.DEF.map(player => player.web_name),
+                    MID: pickedPlayers.MID.map(player => player.web_name),
+                    FWD: pickedPlayers.FWD.map(player => player.web_name)
+                },
+                remaining_budget: budget / 10
+            };
         }
     }
 
