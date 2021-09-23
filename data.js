@@ -113,17 +113,19 @@ module.exports = (axios, randomUseragent, cache) => {
                     'second_name': player.second_name,
                     'web_name': player.web_name,
                     'now_cost': player.now_cost,
-                    'points_per_game': player.points_per_game,
+                    'points_per_game': Number(player.points_per_game),
                     'team_code': player.team_code,
                     'total_points': player.total_points,
                     'transfers_in_event': player.transfers_in_event,
                     'transfers_out_event': player.transfers_out_event,
-                    'value_season': player.value_season,
+                    'value_season': Number(player.value_season),
                     'minutes': player.minutes,
                     'goals_scored': player.goals_scored,
                     'assists': player.assists,
                     'clean_sheets': player.clean_sheets,
                     'form': player.form,
+                    'ict_index_rank': player.ict_index_rank,
+                    'ict_index': Number(player.ict_index),
                     'news': player.news,
                 };
 
@@ -163,8 +165,8 @@ module.exports = (axios, randomUseragent, cache) => {
         },
 
         calculateDesirability: (player, players) => {
-            const highestPPG  = Number(methods.getHighestStat('points_per_game', players));
-            const highestVS   = Number(methods.getHighestStat('value_season', players));
+            const highestPPG  = methods.getHighestStat('points_per_game', players);
+            const highestVS   = methods.getHighestStat('value_season', players);
             const highestTTSP = methods.getHighestStat('top_teams_selected_by_percent', players);
             const highestTTCP = methods.getHighestStat('top_teams_captained_by_percent', players);
             const highestTP   = methods.getHighestStat('total_points', players);
@@ -176,24 +178,76 @@ module.exports = (axios, randomUseragent, cache) => {
             const highestTI   = methods.getHighestStat('transfers_in_event', players);
             const lowestTO    = methods.getLowestStat('transfers_out_event', players);
             const highestF    = methods.getHighestStat('form', players);
+            const highestICTI = methods.getHighestStat('ict_index', players);
 
-            const ratios = [
-                Number(player.points_per_game) / highestPPG,
-                Number(player.value_season) / highestVS,
-                player.top_teams_selected_by_percent / highestTTSP,
-                player.top_teams_captained_by_percent / highestTTCP,
-                player.total_points / highestTP,
-                (lowestFD / player.fixture_difficulty) * 2,
-                player.opposing_team_fixture_difficulty / highestOTFD,
-                player.goals_scored / highestGS,
-                player.assists / highestA,
-                player.clean_sheets / highestCS,
-                player.transfers_in_event / highestTI,
-                lowestTO / player.transfers_out_event,
-                (player.form / highestF) * 3,
-            ];
+            let ratios = {
+                PPG: {
+                    value: player.points_per_game / highestPPG,
+                    weight: 1
+                },
+                VS: {
+                    value: player.value_season / highestVS,
+                    weight: 1
+                },
+                TTSP: {
+                    value: player.top_teams_selected_by_percent / highestTTSP,
+                    weight: 1
+                },
+                TTCP: {
+                    value: player.top_teams_captained_by_percent / highestTTCP,
+                    weight: 1
+                },
+                TP: {
+                    value: player.total_points / highestTP,
+                    weight: 1
+                },
+                FD: {
+                    value: lowestFD / player.fixture_difficulty,
+                    weight: 2
+                },
+                OTFD: {
+                    value: player.opposing_team_fixture_difficulty / highestOTFD,
+                    weight: 1
+                },
+                GS: {
+                    value: player.goals_scored / highestGS,
+                    weight: 1
+                },
+                A: {
+                    value: player.assists / highestA,
+                    weight: 1
+                },
+                CS: {
+                    value: player.clean_sheets / highestCS,
+                    weight: 1
+                },
+                TI: {
+                    value: player.transfers_in_event / highestTI,
+                    weight: 1
+                },
+                TO: {
+                    value: lowestTO / player.transfers_out_event,
+                    weight: 1
+                },
+                F: {
+                    value: player.form / highestF,
+                    weight: 1
+                },
+                ICTI: {
+                    value: player.ict_index / highestICTI,
+                    weight: 1
+                },
+            };
 
-            return ratios.reduce((prev, current) => prev + current);
+            if (player.position == 'GKP' || player.position == 'DEF') {
+                ratios.CS.weight = 2;
+            }
+
+            if (player.position == 'FWD') {
+                ratios.CS.weight = 0;
+            }
+
+            return Object.values(ratios).reduce((total, ratio) => total + (ratio.value * ratio.weight), 0);
         },
 
         getHighestStat: (stat, players) => {
@@ -288,7 +342,7 @@ module.exports = (axios, randomUseragent, cache) => {
                     return false;
                 }
 
-                let playerBudget = totalMadePicks < 8 ? budget : budget / (totalAvailablePicks - totalMadePicks);
+                let playerBudget = totalMadePicks < 7 ? budget : budget / (totalAvailablePicks - totalMadePicks);
 
                 let player = allPlayers[position]
                     .filter(player => player.now_cost <= playerBudget && player.news == '')
