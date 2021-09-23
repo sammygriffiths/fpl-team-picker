@@ -3,7 +3,7 @@ const randomUseragent = require('random-useragent');
 const cache           = require('./cache');
 const dataHelper      = require('./data')(axios, randomUseragent, cache);
 
-const gameWeek = 5;
+const gameWeek = 6;
 
 console.debug = () => {};
 
@@ -13,6 +13,7 @@ const run = async () => {
     const fixtures      = await dataHelper.getFixtures(gameWeek);
     const players       = dataHelper.getPlayerData(bootstrapData, topTeamPicks, fixtures);
     const team          = dataHelper.pickTeam(players);
+    // const team          = dataHelper.getTopPickedTeam(players);
 
     console.log(team);
 };

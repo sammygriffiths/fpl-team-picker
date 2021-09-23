@@ -106,7 +106,7 @@ module.exports = (axios, randomUseragent, cache) => {
         getPlayerData: (bootstrapData, teamPicks, fixtures) => {
             let players = bootstrapData.elements;
 
-            return players.map(player => {
+            let enrichedPlayers = players.map(player => {
                 let enrichedPlayer = {
                     'id': player.id,
                     'first_name': player.first_name,
@@ -123,9 +123,9 @@ module.exports = (axios, randomUseragent, cache) => {
                     'goals_scored': player.goals_scored,
                     'assists': player.assists,
                     'clean_sheets': player.clean_sheets,
+                    'form': player.form,
                     'news': player.news,
                 };
-
 
                 let teamsPickedBy = teamPicks.filter(team => {
                     return !!team.find(pickedPlayer => pickedPlayer.element === player.id);
@@ -156,6 +156,52 @@ module.exports = (axios, randomUseragent, cache) => {
 
                 return enrichedPlayer;
             });
+
+            return enrichedPlayers.map(player => {
+                return { ...player, desirability: methods.calculateDesirability(player, enrichedPlayers) }
+            });
+        },
+
+        calculateDesirability: (player, players) => {
+            const highestPPG  = Number(methods.getHighestStat('points_per_game', players));
+            const highestVS   = Number(methods.getHighestStat('value_season', players));
+            const highestTTSP = methods.getHighestStat('top_teams_selected_by_percent', players);
+            const highestTTCP = methods.getHighestStat('top_teams_captained_by_percent', players);
+            const highestTP   = methods.getHighestStat('total_points', players);
+            const lowestFD    = methods.getLowestStat('fixture_difficulty', players);
+            const highestOTFD = methods.getHighestStat('opposing_team_fixture_difficulty', players);
+            const highestGS   = methods.getHighestStat('goals_scored', players);
+            const highestA    = methods.getHighestStat('assists', players);
+            const highestCS   = methods.getHighestStat('clean_sheets', players);
+            const highestTI   = methods.getHighestStat('transfers_in_event', players);
+            const lowestTO    = methods.getLowestStat('transfers_out_event', players);
+            const highestF    = methods.getHighestStat('form', players);
+
+            const ratios = [
+                Number(player.points_per_game) / highestPPG,
+                Number(player.value_season) / highestVS,
+                player.top_teams_selected_by_percent / highestTTSP,
+                player.top_teams_captained_by_percent / highestTTCP,
+                player.total_points / highestTP,
+                (lowestFD / player.fixture_difficulty) * 2,
+                player.opposing_team_fixture_difficulty / highestOTFD,
+                player.goals_scored / highestGS,
+                player.assists / highestA,
+                player.clean_sheets / highestCS,
+                player.transfers_in_event / highestTI,
+                lowestTO / player.transfers_out_event,
+                (player.form / highestF) * 3,
+            ];
+
+            return ratios.reduce((prev, current) => prev + current);
+        },
+
+        getHighestStat: (stat, players) => {
+            return [...players].sort((playerA, playerB) => playerB[stat] - playerA[stat])[0][stat];
+        },
+
+        getLowestStat: (stat, players) => {
+            return [...players].sort((playerA, playerB) => playerA[stat] - playerB[stat])[0][stat];
         },
 
         getTopPickedTeam: players => {
@@ -212,14 +258,14 @@ module.exports = (axios, randomUseragent, cache) => {
             let teamPicks    = {};
 
             const positionMax = {
-                GKP: 2,
+                GKP: 1,
                 DEF: 5,
                 MID: 5,
                 FWD: 3,
             };
             const totalAvailablePicks = Object.values(positionMax).reduce((a, b) => a + b);
 
-            let budget = 1000;
+            let budget = 960;
 
             const allPlayers = {
                 GKP: players.filter(player => player.position === 'GKP'),
@@ -245,11 +291,9 @@ module.exports = (axios, randomUseragent, cache) => {
                 let playerBudget = totalMadePicks < 8 ? budget : budget / (totalAvailablePicks - totalMadePicks);
 
                 let player = allPlayers[position]
-                    .filter(player => player.now_cost <= playerBudget
-                        && player.total_points > 0
-                        && player.top_teams_selected_by_percent > 0
-                    ).sort((playerA, playerB) => {
-                        return (playerA.fixture_difficulty - playerB.fixture_difficulty) + (playerB.top_teams_selected_by_percent - playerA.top_teams_selected_by_percent);
+                    .filter(player => player.now_cost <= playerBudget && player.news == '')
+                    .sort((playerA, playerB) => {
+                        return playerB.desirability - playerA.desirability;
                     })[0] || {};
 
                 if (pickedPlayers[position].includes(player) || teamPicks[player.team_code] == oneTeamMax) {
@@ -274,10 +318,10 @@ module.exports = (axios, randomUseragent, cache) => {
 
             return {
                 team: {
-                    GKP: pickedPlayers.GKP.map(player => player.web_name),
-                    DEF: pickedPlayers.DEF.map(player => player.web_name),
-                    MID: pickedPlayers.MID.map(player => player.web_name),
-                    FWD: pickedPlayers.FWD.map(player => player.web_name)
+                    GKP: pickedPlayers.GKP.map(player => `${player.web_name} - ${player.desirability}`),
+                    DEF: pickedPlayers.DEF.map(player => `${player.web_name} - ${player.desirability}`),
+                    MID: pickedPlayers.MID.map(player => `${player.web_name} - ${player.desirability}`),
+                    FWD: pickedPlayers.FWD.map(player => `${player.web_name} - ${player.desirability}`)
                 },
                 remaining_budget: budget / 10
             };
