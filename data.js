@@ -7,12 +7,13 @@ const loginEndpoint     = 'https://users.premierleague.com/accounts/login/';
 const profileEndpoint   = 'me/';
 const myTeamEndpoint    = teamID => `my-team/${teamID}`;
 
-module.exports = (axios, randomUseragent, cache) => {
+module.exports = (axios, randomUseragent, cache, proxy) => {
     let axiosInstance = axios.create({
         baseURL: apiBase,
         headers: {
           'User-Agent': randomUseragent.getRandom(),
         },
+        httpsAgent: proxy
     });
 
     const methods = {
