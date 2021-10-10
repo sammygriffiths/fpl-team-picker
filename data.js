@@ -3,13 +3,16 @@ const bootstrapEndpoint = 'bootstrap-static/';
 const topTeamsEndpoint  = 'leagues-classic/314/standings/?page_standings=';
 const teamPicksEndpoint = (entry, gameWeek) => `/entry/${entry}/event/${gameWeek}/picks/`;
 const fixturesEndpoint  = 'fixtures/?event=';
+const loginEndpoint     = 'https://users.premierleague.com/accounts/login/';
+const profileEndpoint   = 'me/';
+const myTeamEndpoint    = teamID => `my-team/${teamID}`;
 
 module.exports = (axios, randomUseragent, cache) => {
     let axiosInstance = axios.create({
         baseURL: apiBase,
         headers: {
-          'User-Agent': randomUseragent.getRandom()
-        }
+          'User-Agent': randomUseragent.getRandom(),
+        },
     });
 
     const methods = {
@@ -109,6 +112,7 @@ module.exports = (axios, randomUseragent, cache) => {
             let enrichedPlayers = players.map(player => {
                 let enrichedPlayer = {
                     'id': player.id,
+                    'chance_of_playing_next_round': player.chance_of_playing_next_round,
                     'first_name': player.first_name,
                     'second_name': player.second_name,
                     'web_name': player.web_name,
@@ -379,7 +383,134 @@ module.exports = (axios, randomUseragent, cache) => {
                 },
                 remaining_budget: budget / 10
             };
-        }
+        },
+
+        getSuggestedTransfers: (myTeam, players, prioritisePlayersWithNews = true) => {
+            if (myTeam.transfers.limit <= myTeam.transfers.made) {
+                return;
+            }
+
+            let potentialTransfers = myTeam.picks.map(pick => {
+                let currentPlayer = players.find(player => player.id == pick.element);
+                let money         = myTeam.transfers.bank + pick.selling_price;
+                let bestOption    = players.filter(player => {
+                    let playerInTeam = !!myTeam.picks.find(pick => pick.element == player.id);
+                    return player.position === currentPlayer.position && player.now_cost <= money && player.news == '' && !playerInTeam;
+                }).sort((playerA, playerB) => {
+                    return playerB.desirability - playerA.desirability;
+                })[0];
+                return {
+                    position: pick.position,
+                    potentialImprovement: bestOption.desirability - currentPlayer.desirability,
+                    playerOut: currentPlayer,
+                    playerIn: bestOption,
+                };
+            });
+
+            if (prioritisePlayersWithNews) {
+                let transfersWithNews = potentialTransfers.filter(transfer => {
+                    return transfer.playerOut.news != '';
+                });
+
+                if (transfersWithNews.length > 0) {
+                    return transfersWithNews.slice(0, myTeam.transfers.limit - myTeam.transfers.made);
+                }
+            }
+
+            return potentialTransfers.filter(transfer => {
+                return transfer.position != 12 && transfer.potentialImprovement > 0;
+            }).sort((transferA, transferB) => {
+                return transferB.potentialImprovement - transferA.potentialImprovement;
+            }).slice(0, myTeam.transfers.limit - myTeam.transfers.made);
+        },
+
+        login: async (email, password) => {
+            console.debug(`Getting cookie data for ${email} from cache`);
+            let cookieCache = cache(`${email}${password}`);
+            let cookieData  = cookieCache.get();
+
+            if (cookieData === null) {
+                console.debug('Cache expired, fetching cookie data from FPL API');
+
+                const params = new URLSearchParams();
+                params.append('login', email);
+                params.append('password', password);
+                params.append('app', 'plfpl-web');
+                params.append('redirect_uri', 'https://fantasy.premierleague.com/a/login');
+
+                cookieData = await axiosInstance.post(loginEndpoint, params, {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    withCredentials: true,
+                    maxRedirects: 0,
+                    validateStatus: status => {
+                        return status <= 302; // Reject only if the status code is greater than 302
+                    },
+                }).then(({ headers }) => headers['set-cookie'].join('; '));
+
+                console.debug(`Saving cookie data for ${email} to cache`);
+                cookieCache.set(cookieData, 604800000);
+                cookieCache.save();
+            }
+
+            return cookieData;
+        },
+
+        getProfile: async (email, cookies) => {
+            console.debug(`Getting profile for ${email} from cache`);
+            let profileCache = cache(`${email}profile`);
+            let profileData  = profileCache.get();
+
+            if (profileData === null) {
+                console.debug(`Cache expired, fetching profile for ${email} from FPL API`);
+                profileData = await axiosInstance.get(profileEndpoint, {
+                    headers: {
+                        'Cookie': cookies
+                    }
+                }).then(response => response.data);
+
+                console.debug(`Saving profile for ${email} to cache`);
+                profileCache.set(profileData);
+                profileCache.save();
+            }
+
+            return profileData;
+        },
+
+        getMyTeam: async (teamID, cookies) => {
+            console.debug(`Getting my team for ${teamID} from cache`);
+            let teamCache = cache(`${teamID}myteam`);
+            let teamData  = teamCache.get();
+
+            if (teamData === null) {
+                console.debug(`Cache expired, fetching my team for ${teamID} from FPL API`);
+                teamData = await axiosInstance.get(myTeamEndpoint(teamID), {
+                    headers: {
+                        'Cookie': cookies
+                    }
+                }).then(response => response.data);
+
+                console.debug(`Saving my team for ${teamID} to cache`);
+                teamCache.set(teamData);
+                teamCache.save();
+            }
+
+            return teamData;
+        },
+
+        enrichMyTeam: (myTeam, players) => {
+            let myTeamEnriched = {
+                chips: myTeam.chips,
+                transfers: myTeam.transfers,
+            }
+
+            myTeamEnriched.picks = myTeam.picks.map(pick => {
+                return {...pick, ...players.find(player => player.id == pick.element)};
+            });
+
+            return myTeamEnriched;
+        },
     }
 
     return methods;
