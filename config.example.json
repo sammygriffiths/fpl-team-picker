@@ -2,5 +2,6 @@
     "gameWeek": 8,
     "email": "login@email.here",
     "password": "pa$$w0rdhere",
-    "debug": true
+    "debug": true,
+    "proxy": "http://username:pass@myproxy:port"
 }
